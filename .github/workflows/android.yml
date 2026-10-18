@@ -51,6 +51,10 @@ jobs:
       - name: Build project
         run: ./gradlew build
 
+      # Compile instrumented test sources without requiring a connected device/emulator.
+      - name: Compile Android instrumented test sources
+        run: ./gradlew :android:compileDebugAndroidTestKotlin
+
       # Already produced by "build" above; kept as its own explicit step
       # so the debug APK's origin is clear right before it is uploaded.
       # Gradle reports this up-to-date rather than rebuilding it.
