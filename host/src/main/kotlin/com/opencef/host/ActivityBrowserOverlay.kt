@@ -4,6 +4,7 @@ import android.app.Activity
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
+import android.net.Uri
 import android.os.Looper
 import android.view.Gravity
 import android.view.View
@@ -26,11 +27,13 @@ import android.widget.TextView
  * Always call dispose() from the owning Activity's onDestroy().
  */
 class ActivityBrowserOverlay @JvmOverloads constructor(
-    private val activity: Activity,
+    ownerActivity: Activity,
     initialUrl: String,
     buttonLabel: String = "WEB",
 ) {
 
+    // Check the thread before constructing any Android View instances.
+    private val activity: Activity = requireMainThread(ownerActivity)
     private val host: BrowserHost = BrowserHost.create(activity)
     private val browserLayer = FrameLayout(activity)
     private val browserContainer = FrameLayout(activity)
@@ -47,7 +50,6 @@ class ActivityBrowserOverlay @JvmOverloads constructor(
         get() = disposed
 
     init {
-        checkMainThread()
         requireBundledAssetUrl(initialUrl)
 
         browserLayer.apply {
@@ -193,7 +195,7 @@ class ActivityBrowserOverlay @JvmOverloads constructor(
         require(path.startsWith(ASSET_PREFIX)) {
             "ActivityBrowserOverlay accepts only bundled assets: $ASSET_PREFIX..."
         }
-        val relativePath = path.removePrefix(ASSET_PREFIX)
+        val relativePath = Uri.decode(path.removePrefix(ASSET_PREFIX))
         require(relativePath.isNotBlank() && relativePath.split('/').none { it == "." || it == ".." }) {
             "Invalid bundled asset path."
         }
@@ -204,9 +206,7 @@ class ActivityBrowserOverlay @JvmOverloads constructor(
     }
 
     private fun checkMainThread() {
-        check(Looper.myLooper() == Looper.getMainLooper()) {
-            "ActivityBrowserOverlay UI operations must run on the main thread."
-        }
+        requireMainThread(activity)
     }
 
     private fun dp(value: Int): Int =
@@ -214,5 +214,12 @@ class ActivityBrowserOverlay @JvmOverloads constructor(
 
     private companion object {
         const val ASSET_PREFIX = "file:///android_asset/"
+
+        fun requireMainThread(activity: Activity): Activity {
+            check(Looper.myLooper() == Looper.getMainLooper()) {
+                "ActivityBrowserOverlay UI operations must run on the main thread."
+            }
+            return activity
+        }
     }
 }
