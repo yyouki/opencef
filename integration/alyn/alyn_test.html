@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>OpenCEF Alyn integration smoke test</title>
+  <style>
+    :root { color-scheme: dark; font-family: system-ui, sans-serif; }
+    body { margin: 0; padding: 24px; background: #101820; color: #edf4f8; }
+    main { max-width: 720px; margin: 0 auto; }
+    h1 { font-size: 1.45rem; }
+    p, pre { line-height: 1.5; overflow-wrap: anywhere; }
+    .status { padding: 12px; border: 1px solid #506170; border-radius: 8px; }
+    button { padding: 12px 16px; border: 0; border-radius: 8px; color: #102030; background: #9de1ff; font-weight: 700; }
+    button:disabled { opacity: .45; }
+    pre { white-space: pre-wrap; min-height: 40px; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>OpenCEF · Alyn host smoke test</h1>
+  <p>This page is a local integration test. It does not require a network connection.</p>
+  <p id="status" class="status">Waiting for the native bridge…</p>
+  <button id="send" disabled>Send test event to Kotlin</button>
+  <h2>Last native response</h2>
+  <pre id="response">No response yet.</pre>
+</main>
+<script>
+(function () {
+  var status = document.getElementById("status");
+  var send = document.getElementById("send");
+  var response = document.getElementById("response");
+  var eventNumber = 0;
+  var listening = false;
+
+  function installBridgeWhenReady() {
+    if (!window.cef ||
+        typeof window.cef.isReady !== "function" ||
+        !window.cef.isReady() ||
+        typeof window.cef.on !== "function") {
+      window.setTimeout(installBridgeWhenReady, 50);
+      return;
+    }
+
+    if (listening) return;
+    listening = true;
+
+    window.cef.on("overlay_test_result", function (payload) {
+      response.textContent = payload;
+      status.textContent = "JavaScript ↔ Kotlin round-trip received.";
+    });
+
+    window.cef.emit("host_page_ready", JSON.stringify({
+      page: "alyn_overlay_smoke_test",
+      ready: true
+    }));
+    send.disabled = false;
+    status.textContent = "Native bridge ready.";
+  }
+
+  send.addEventListener("click", function () {
+    eventNumber += 1;
+    window.cef.emit("overlay_test_event", JSON.stringify({
+      event: "ping",
+      sequence: eventNumber
+    }));
+    status.textContent = "Sent event #" + eventNumber + "; waiting for Kotlin…";
+  });
+
+  installBridgeWhenReady();
+})();
+</script>
+</body>
+</html>
