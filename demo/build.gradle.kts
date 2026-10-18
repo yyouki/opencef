@@ -26,6 +26,6 @@ android {
 }
 
 dependencies {
-    implementation(project(":android"))
+    implementation(project(":host"))
     implementation(libs.androidx.activity)
 }

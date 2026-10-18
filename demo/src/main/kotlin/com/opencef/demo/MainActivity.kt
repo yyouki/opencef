@@ -7,31 +7,38 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.activity.ComponentActivity
-import com.opencef.android.AndroidBrowserManager
-import com.opencef.android.JsonMessageSerializer
-import com.opencef.core.BrowserInstance
+import com.opencef.host.BrowserHost
 import org.json.JSONObject
+import java.util.concurrent.atomic.AtomicInteger
 
 class MainActivity : ComponentActivity() {
 
-    private val serializer = JsonMessageSerializer()
-    private lateinit var browserManager: AndroidBrowserManager
-    private lateinit var browser: BrowserInstance
-    private lateinit var browserContainer: FrameLayout
-    private lateinit var statusLabel: TextView
-    private var resizedSmall = false
-    private var onPageTwo = false
+    @Volatile
+    private var host: BrowserHost? = null
+
+    private val hostEventCount = AtomicInteger(0)
+
+    private lateinit var statusView: TextView
+
+    private var pageState = "starting"
+    private var visibilityState = "visible"
+    private var runtimeReady = false
+    private var lastHostEvent = "none yet"
+    private var lastRoundTrip = "none yet"
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        statusLabel = TextView(this)
+        statusView = TextView(this).apply {
+            textSize = 14f
+            setPadding(24, 16, 24, 16)
+        }
 
         val controls = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
         }
 
-        browserContainer = FrameLayout(this).apply {
+        val browserContainer = FrameLayout(this).apply {
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 0,
@@ -41,90 +48,108 @@ class MainActivity : ComponentActivity() {
 
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            layoutParams = ViewGroup.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.MATCH_PARENT,
-            )
-            addView(statusLabel)
+            fitsSystemWindows = true
+            addView(statusView)
             addView(controls)
             addView(browserContainer)
         }
         setContentView(root)
 
-        browserManager = AndroidBrowserManager(this)
-        browser = browserManager.create("file:///android_asset/www/index.html")
-        browserManager.attachTo(browser.handle, browserContainer)
+        val browserHost = BrowserHost.create(this)
+        host = browserHost
+        browserHost.createBrowser(DEMO_URL, browserContainer)
+        registerBrowserListeners(browserHost)
 
-        wireBrowserEvents()
+        addControlButton(controls, "Show") { host?.show() }
+        addControlButton(controls, "Hide") { host?.hide() }
+        addControlButton(controls, "Reload") { host?.reload() }
+        addControlButton(controls, "Destroy") { host?.destroyBrowser() }
 
-        addControlButton(controls, "Reload") { browser.reload() }
-        addControlButton(controls, "Stop") { browser.stopLoading() }
-        addControlButton(controls, "Hide/Show") { toggleVisibility() }
-        addControlButton(controls, "Resize") { toggleResize() }
-        addControlButton(controls, "Page 2") { toggleNavigation() }
-    }
-
-    // Every listener here that touches the status TextView wraps the update
-    // in runOnUiThread(): "loading"/"loaded" happen to already fire on the
-    // UI thread (they come from WebViewClient), but "login" and
-    // "demoMessage" arrive on a WebView-managed thread (see WebViewJsBridge)
-    // - the same rule applies to all of them regardless, rather than relying
-    // on knowing which thread each specific event happens to fire from.
-    private fun wireBrowserEvents() {
-        browser.on("loading") { runOnUiThread { statusLabel.text = "Loading..." } }
-        browser.on("loaded") { runOnUiThread { statusLabel.text = "Ready" } }
-        browser.on("login") { payload -> handleLogin(payload) }
-        browser.on("demoMessage") { payload -> handleDemoMessage(payload) }
-    }
-
-    private fun toggleVisibility() {
-        if (browser.isVisible) browser.hide() else browser.show()
-    }
-
-    private fun toggleResize() {
-        resizedSmall = !resizedSmall
-        if (resizedSmall) {
-            browser.resize(browserContainer.width / 2, browserContainer.height / 2)
-        } else {
-            browser.resize(browserContainer.width, browserContainer.height)
-        }
-    }
-
-    private fun toggleNavigation() {
-        onPageTwo = !onPageTwo
-        val target = if (onPageTwo) {
-            "file:///android_asset/www/page2.html"
-        } else {
-            "file:///android_asset/www/index.html"
-        }
-        browser.loadUrl(target)
-    }
-
-    private fun addControlButton(row: LinearLayout, label: String, onClick: () -> Unit) {
-        row.addView(
-            Button(this).apply {
-                text = label
-                setOnClickListener { onClick() }
-            },
-        )
-    }
-
-    private fun handleLogin(payload: String) {
-        val data = serializer.fromJson(payload)
-        val username = data["username"] as? String ?: "unknown"
-        val message = JSONObject.quote("Welcome, $username! Native received your login.")
-        browser.executeJS("window.demo && window.demo.onNativeMessage($message)")
-    }
-
-    private fun handleDemoMessage(payload: String) {
-        val data = serializer.fromJson(payload)
-        val text = data["text"] as? String ?: ""
-        val response = mapOf("text" to "Native saw: $text")
-        browser.emit("nativeMessage", serializer.toJson(response))
+        renderStatus()
     }
 
     override fun onDestroy() {
-        browserManager.destroyAll()
+        host?.shutdown()
+        host = null
         super.onDestroy()
+    }
+
+    private fun registerBrowserListeners(browserHost: BrowserHost) {
+        browserHost.on("loading") {
+            updateStatus {
+                pageState = "loading"
+                runtimeReady = false
+            }
+        }
+        browserHost.on("loaded") { updateStatus { pageState = "loaded" } }
+        browserHost.on("error") { updateStatus { pageState = "error" } }
+        browserHost.on("visibilityChanged") { payload ->
+            val visible = readVisible(payload)
+            updateStatus { visibilityState = if (visible) "visible" else "hidden" }
+        }
+        browserHost.on("destroyed") {
+            updateStatus {
+                pageState = "destroyed"
+                runtimeReady = false
+            }
+        }
+        browserHost.on("host_page_ready") { updateStatus { runtimeReady = true } }
+        browserHost.on("host_test_event") { payload -> handleTestEvent(payload) }
+    }
+
+    private fun handleTestEvent(payload: String) {
+        val request = runCatching { JSONObject(payload) }.getOrNull()
+        val sequence = request?.optInt("sequence", 0) ?: 0
+        val text = request?.optString("text", "").orEmpty()
+        val hostEventNumber = hostEventCount.incrementAndGet()
+
+        val response = JSONObject()
+            .put("sequence", sequence)
+            .put("text", "Host received: $text")
+            .put("hostEventCount", hostEventNumber)
+            .toString()
+        host?.emit("host_test_result", response)
+
+        updateStatus {
+            lastHostEvent = "host_test_event #$hostEventNumber (page sequence $sequence)"
+            lastRoundTrip = "host_test_result #$hostEventNumber sent to page"
+        }
+    }
+
+    private fun readVisible(payload: String): Boolean {
+        return runCatching { JSONObject(payload).optBoolean("visible", true) }.getOrDefault(true)
+    }
+
+    private fun updateStatus(change: () -> Unit) {
+        runOnUiThread {
+            change()
+            renderStatus()
+        }
+    }
+
+    private fun renderStatus() {
+        statusView.text = buildString {
+            if (pageState == "destroyed") {
+                appendLine("Browser: destroyed")
+            } else {
+                appendLine("Browser: $pageState, $visibilityState")
+            }
+            appendLine("Runtime ready (page-reported): ${if (runtimeReady) "yes" else "no"}")
+            appendLine("Host event received: $lastHostEvent")
+            append("Round trip: $lastRoundTrip")
+        }
+    }
+
+    private fun addControlButton(parent: LinearLayout, label: String, action: () -> Unit) {
+        val button = Button(this).apply {
+            text = label
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+            setOnClickListener { action() }
+        }
+        parent.addView(button)
+    }
+
+    private companion object {
+        const val DEMO_URL = "file:///android_asset/www/host_demo.html"
     }
 }

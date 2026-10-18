@@ -24,9 +24,6 @@ jobs:
           java-version: "17"
           cache: gradle
 
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v3
-
       - name: Configure Android SDK environment
         shell: bash
         run: |
@@ -48,7 +45,7 @@ jobs:
       - name: Run core unit tests
         run: ./gradlew :core:test
 
-      # Builds and checks every module (core, android, demo). Gradle's
+      # Builds and checks every module (core, android, host, demo). Gradle's
       # up-to-date checking means the core tests above are not redone
       # from scratch here.
       - name: Build project

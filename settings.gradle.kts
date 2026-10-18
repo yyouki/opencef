@@ -17,4 +17,4 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "OpenCEF-Android"
-include(":core", ":android", ":demo")
+include(":core", ":android", ":host", ":demo")

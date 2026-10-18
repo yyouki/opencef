@@ -9,6 +9,7 @@ android {
 
     defaultConfig {
         minSdk = 26
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     compileOptions {
@@ -22,6 +23,17 @@ android {
 }
 
 dependencies {
-    api(project(":core"))
-    api("org.greenrobot:eventbus:3.3.1")
+    implementation(project(":core"))
+
+    // src/test-only: plain JUnit4 for PageGenerationTrackerTest, a pure
+    // JVM logic test with zero Android dependency - does not need the
+    // instrumentation runner below at all.
+    testImplementation(libs.junit)
+
+    // androidTest-only: the minimal runner/context infrastructure an
+    // Android instrumented test needs to exist at all
+    // (SamePageNavigationInstrumentedTest below). Not used by the
+    // framework itself - main/ has no androidx.test dependency.
+    androidTestImplementation(libs.androidx.test.junit)
+    androidTestImplementation(libs.androidx.test.core)
 }

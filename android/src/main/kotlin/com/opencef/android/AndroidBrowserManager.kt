@@ -90,10 +90,11 @@ class AndroidBrowserManager(
     private fun buildWebView(url: String, eventBus: EventBus): WebView {
         val webView = WebView(context)
         webView.settings.javaScriptEnabled = true
-        webView.webViewClient = OpenCefWebViewClient(eventBus)
+        val jsBridge = WebViewJsBridge(eventBus)
+        webView.webViewClient = OpenCefWebViewClient(eventBus, jsBridge)
         // Only trusted, bundled local content should ever be loaded here -
         // this bridge is reachable by whatever page is currently loaded.
-        webView.addJavascriptInterface(WebViewJsBridge(eventBus), "cef")
+        webView.addJavascriptInterface(jsBridge, "cef")
         webView.loadUrl(url)
         return webView
     }
@@ -104,9 +105,16 @@ class AndroidBrowserManager(
 // nothing here leaks WebView/WebResourceError/WebResourceRequest types out
 // through BrowserInstance.on(). Runs on the UI thread, same as the WebView
 // callbacks it overrides.
-private class OpenCefWebViewClient(private val eventBus: EventBus) : WebViewClient() {
+private class OpenCefWebViewClient(
+    private val eventBus: EventBus,
+    private val jsBridge: WebViewJsBridge,
+) : WebViewClient() {
+
+    private val pageGeneration = PageGenerationTracker()
 
     override fun onPageStarted(view: WebView, url: String, favicon: Bitmap?) {
+        pageGeneration.advance()
+        jsBridge.setReady(false)
         val payload = JSONObject().put("url", url).toString()
         eventBus.onMessage("navigation", payload)
         eventBus.onMessage("loading", payload)
@@ -116,7 +124,12 @@ private class OpenCefWebViewClient(private val eventBus: EventBus) : WebViewClie
         // Re-installed on every navigation, since each page load gets a
         // fresh JS context with no memory of previously-registered
         // window.cef.on() listeners.
-        view.evaluateJavascript(JS_RUNTIME_BOOTSTRAP, null)
+        val ownGeneration = pageGeneration.currentToken()
+        view.evaluateJavascript(JS_RUNTIME_BOOTSTRAP) {
+            if (pageGeneration.isCurrent(ownGeneration)) {
+                jsBridge.setReady(true)
+            }
+        }
         val payload = JSONObject().put("url", url).toString()
         eventBus.onMessage("loaded", payload)
     }
@@ -141,10 +154,12 @@ private class OpenCefWebViewClient(private val eventBus: EventBus) : WebViewClie
 (function() {
     if (!window.cef || window.cef.__opencefRuntime) { return; }
     var nativeEmit = window.cef.emit.bind(window.cef);
+    var nativeIsReady = window.cef.isReady.bind(window.cef);
     var listeners = {};
     window.cef = {
         __opencefRuntime: true,
         emit: function(event, payload) { nativeEmit(event, payload); },
+        isReady: function() { return nativeIsReady(); },
         on: function(event, callback) {
             (listeners[event] || (listeners[event] = [])).push(callback);
         },

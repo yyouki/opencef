@@ -64,11 +64,25 @@
             document.getElementById('status').textContent = 'Sent login event, waiting for native...';
         });
 
-        // window.cef.on/off only exist once the Milestone 3 runtime has been
-        // injected, which happens after the page finishes loading - so this
-        // registration waits for the window "load" event rather than
-        // running immediately at parse time.
-        window.addEventListener('load', function () {
+        // window.cef.emit() is safe immediately (it's native-backed and
+        // exists from the very first script on the page). window.cef.on()/
+        // off() are different: they only exist once the runtime bootstrap
+        // has actually finished running inside this page, which happens
+        // asynchronously and is NOT reliably correlated with "load" or
+        // "DOMContentLoaded" - onPageFinished() (which triggers the
+        // injection) can fire before or after those events. isReady() is
+        // the one thing native code guarantees is accurate at any moment,
+        // because it is itself a native-backed call, not a JS flag that
+        // depends on injection timing. whenCefReady() below just polls it.
+        function whenCefReady(callback) {
+            if (window.cef.isReady()) {
+                callback();
+            } else {
+                setTimeout(function () { whenCefReady(callback); }, 10);
+            }
+        }
+
+        whenCefReady(function () {
             var demoStatusEl = document.getElementById('demoStatus');
             var subscribed = true;
 

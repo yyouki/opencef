@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><title>OpenCEF navigation test</title></head>
+<body>
+<script>
+(function waitForOpenCef() {
+    if (!window.cef || !window.cef.isReady()) {
+        setTimeout(waitForOpenCef, 10);
+        return;
+    }
+    window.cef.on("probe", function (payload) {
+        window.cef.emit("probeEcho", payload);
+    });
+    window.cef.emit("pageReady", JSON.stringify({ ready: true }));
+})();
+</script>
+</body>
+</html>

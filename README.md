@@ -190,3 +190,18 @@ not used.
 lifecycle callbacks and JS runtime injection, is not unit-tested here on
 purpose - it requires a real Android runtime, so it belongs in an
 instrumented test in a later milestone.
+
+
+## Host Integration
+
+The `host` Android library is a thin, game-independent adapter around the existing browser modules. The dependency direction is:
+
+```
+demo → host → android → core
+```
+
+The host coordinates a single browser instance and its attachment to a normal Android `ViewGroup`. It does not implement another WebView, JavaScript bridge, event bus, or readiness tracker.
+
+The demo loads bundled, trusted HTML from app assets and exercises the JavaScript/native event round trip. Use only application-controlled content while the `cef` JavaScript bridge is enabled; this bridge is not intended for arbitrary or remote websites.
+
+This host integration remains WebView-based. It is not the official Chromium Embedded Framework and does not include GTA:SA, SA-MP, open.mp, JNI, or C++ game integration. A future legitimate Android client can connect at the host API boundary without changing the pure-Kotlin `core` module.
